@@ -47,6 +47,7 @@ import {
 import type * as z from 'zod/v4';
 
 import { getCompleter, isCompletable } from './completable';
+import { installServerExtensions } from './extension';
 import type { ScopeChallengeHandler } from './scopeChallenge';
 import { supportsScopeChallengeResolver } from './scopeChallenge';
 import type { ServerOptions } from './server';
@@ -150,7 +151,9 @@ export class McpServer {
     }
 
     constructor(serverInfo: Implementation, options?: McpServerOptions) {
-        this.server = new Server(serverInfo, options);
+        // Extensions are installed below, once this McpServer can be handed to `attach`.
+        const { extensions, ...serverOptions } = options ?? {};
+        this.server = new Server(serverInfo, serverOptions);
         this._maxToolInputElements = resolveMaxToolInputElements(options?.maxToolInputElements);
 
         // Per the MCP spec, a server that declares a primitive capability MUST respond to its
@@ -167,6 +170,8 @@ export class McpServer {
         if (options?.capabilities?.prompts) {
             this.setPromptRequestHandlers();
         }
+
+        installServerExtensions(this.server, extensions ?? [], this);
     }
 
     /**
@@ -314,8 +319,12 @@ export class McpServer {
                 // wrapped) so the listing and the call cannot diverge.
                 return this.server.projectCallToolResult(result, tool.outputSchemaJson);
             } catch (error) {
-                if (error instanceof ProtocolError && error.code === ProtocolErrorCode.UrlElicitationRequired) {
-                    throw error; // Return the error to the caller without wrapping in CallToolResult
+                if (
+                    error instanceof ProtocolError &&
+                    (error.code === ProtocolErrorCode.UrlElicitationRequired ||
+                        error.code === ProtocolErrorCode.MissingRequiredClientCapability)
+                ) {
+                    throw error; // Protocol-level: return the error to the caller without wrapping in CallToolResult
                 }
                 return this.createToolError(error instanceof Error ? error.message : String(error));
             }

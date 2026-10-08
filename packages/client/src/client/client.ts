@@ -80,6 +80,7 @@ import {
     SUPPORTED_MODERN_PROTOCOL_VERSIONS
 } from '@modelcontextprotocol/core-internal';
 
+import type { ClientExtension } from './extension';
 import type { PriorDiscovery } from './probeClassifier';
 import type { CacheMode, CacheScope, ResponseCacheStore } from './responseCache';
 import { ClientResponseCache, InMemoryResponseCacheStore, MAX_CACHE_TTL_MS } from './responseCache';
@@ -181,6 +182,18 @@ export function getSupportedElicitationModes(capabilities: ClientCapabilities['e
 }
 
 export type ClientOptions = ProtocolOptions & {
+    /**
+     * Extensions to install at construction. Each is advertised under
+     * `capabilities.extensions[extension.id]` and then installed, in order —
+     * see {@linkcode ClientExtension}. A duplicate `id` fails construction
+     * before any extension is installed.
+     *
+     * Experimental: the shape of an extension may change in a minor release.
+     *
+     * @experimental
+     */
+    extensions?: ClientExtension[];
+
     /**
      * Capabilities to advertise as being supported by this client.
      */
@@ -679,6 +692,19 @@ export class Client extends Protocol<ClientContext> {
         // Store list changed config for setup after connection (when we know server capabilities)
         if (options?.listChanged) {
             this._listChangedConfig = options.listChanged;
+        }
+
+        const extensions = options?.extensions ?? [];
+        const ids = new Set<string>();
+        for (const extension of extensions) {
+            if (ids.has(extension.id)) {
+                throw new Error(`Extension "${extension.id}" is listed more than once; pass each extension once`);
+            }
+            ids.add(extension.id);
+        }
+        for (const extension of extensions) {
+            this.registerCapabilities({ extensions: { [extension.id]: {} } });
+            extension.install(this);
         }
     }
 
